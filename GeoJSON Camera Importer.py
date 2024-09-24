@@ -16,7 +16,7 @@ from math import radians, tan
 class ImportGeoJSONCameraOperator(bpy.types.Operator, ImportHelper):
     bl_idname = "import_scene.geojson_camera"
     bl_label = "Import GeoJSON Cameras"
-    bl_description = "Imports cameras from geojson files exported from Open Drone Map (ODM), adds matching images if present. The correct geojson file usually ends with \"...projectname...-shots.geojson\""
+    bl_description = "Imports cameras from geojson files exported from OpenDroneMap (ODM), adds matching images if present. The correct geojson file usually ends with \"...projectname...-shots.geojson\""
     bl_options = {'PRESET', 'UNDO'}
     filename_ext = ".geojson"
     filter_glob: bpy.props.StringProperty(
