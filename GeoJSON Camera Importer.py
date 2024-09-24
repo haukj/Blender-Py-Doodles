@@ -4,61 +4,102 @@ bl_info = {
     "version": (1, 0, 0),
     "blender": (4, 2, 0),
     "author": "Kjetil Haughom",
-    "location": "View3D > UI > Camera Import",
+    "location": "File > Import > GeoJSON Camera (.geojson)",
     "category": "Import-Export",
 }
 
-import bpy, json, os, math
+import bpy
+import json
+import os
+import math
 from bpy_extras.io_utils import ImportHelper
 from mathutils import Matrix, Vector
 from math import radians, tan
+
 
 class ImportGeoJSONCameraOperator(bpy.types.Operator, ImportHelper):
     bl_idname = "import_scene.geojson_camera"
     bl_label = "Import GeoJSON Cameras"
     bl_description = "Imports cameras from geojson files exported from OpenDroneMap (ODM), adds matching images if present. The correct geojson file usually ends with \"...projectname...-shots.geojson\""
     bl_options = {'PRESET', 'UNDO'}
+    
     filename_ext = ".geojson"
     filter_glob: bpy.props.StringProperty(
         default="*.geojson",
         options={'HIDDEN'},
         maxlen=255,
-    )
+    ) # type: ignore
 
     sensor_width: bpy.props.FloatProperty(
         name="Sensor Width",
         description="Camera sensor width in mm",
         default=36.0,
-    )
+    ) # type: ignore
+
+    use_mean_midpoint: bpy.props.BoolProperty(
+        name="Calculate Mean Midpoint",
+        description="Calculate the mean midpoint of all cameras and use as offset",
+        default=False,
+    ) # type: ignore
 
     translation_offset_x: bpy.props.FloatProperty(
         name="Translation Offset X",
         description="Offset for the X axis",
         default=0.0,
-    )
+    ) # type: ignore
     
     translation_offset_y: bpy.props.FloatProperty(
         name="Translation Offset Y",
         description="Offset for the Y axis",
         default=0.0,
-    )
+    ) # type: ignore
     
     translation_offset_z: bpy.props.FloatProperty(
         name="Translation Offset Z",
         description="Offset for the Z axis",
         default=0.0,
-    )
+    ) # type: ignore
+
+    def create_offset_text_object(self):
+        # Create a formatted text string with the offset values
+        offset_text = f"X:{self.translation_offset_x:.2f}\nY:{self.translation_offset_y:.2f}\nZ:{self.translation_offset_z:.2f}".upper()
+        
+        # Create a new text object in Blender at the origin
+        bpy.ops.object.text_add(location=(0, 0, 0))
+        text_object = bpy.context.object
+        text_object.data.body = offset_text  # Set the text content
+        text_object.name = "Offset Values"
+        text_object.data.align_x = 'CENTER'
+        text_object.data.size = 10
+        
+        # Print to console for debug purposes
+        print(f"Created text object with offset: {offset_text}")
 
     def calculate_translation_offset(self, features):
-        translations = [feature['properties']['translation'] for feature in features]
-        min_x = min(translations, key=lambda t: t[0])[0]
-        min_y = min(translations, key=lambda t: t[1])[1]
-        max_x = max(translations, key=lambda t: t[0])[0]
-        max_y = max(translations, key=lambda t: t[1])[1]
-        center_x = (min_x + max_x) / 2
-        center_y = (min_y + max_y) / 2
-        self.translation_offset_x = center_x
-        self.translation_offset_y = center_y
+        # Only calculate the mean midpoint if the user enabled it
+        if self.use_mean_midpoint:
+            print("Calculating mean midpoint for offset...")
+            translations = [feature['properties']['translation'] for feature in features]
+            
+            avg_x = sum(t[0] for t in translations) / len(translations)
+            avg_y = sum(t[1] for t in translations) / len(translations)
+
+            self.translation_offset_x = avg_x
+            self.translation_offset_y = avg_y
+
+            print(f"Mean midpoint calculated: X={avg_x}, Y={avg_y}")
+        else:
+            print("Using manual offset...")
+
+        # Check if any offset is applied
+        if (self.translation_offset_x == 0.0 and 
+            self.translation_offset_y == 0.0):
+            # If no offset applied, do not create the text object
+            print("No offset applied, skipping text object creation.")
+            return
+        else:
+            # Create the text object with the offset values
+            self.create_offset_text_object()
 
     def get_matrix(self, translation, rotation, scale=1.0):
         axis = Vector((-rotation[0], -rotation[1], -rotation[2]))
@@ -85,7 +126,6 @@ class ImportGeoJSONCameraOperator(bpy.types.Operator, ImportHelper):
         correction_matrix = Matrix.Rotation(radians(180), 4, 'X')
         final_matrix = translation_matrix @ rotation_matrix @ correction_matrix
         
-        #print(f"Generated matrix: {final_matrix}")
         return final_matrix
 
     def find_corresponding_images(self, base_path, camera_name):
@@ -121,7 +161,6 @@ class ImportGeoJSONCameraOperator(bpy.types.Operator, ImportHelper):
         bpy.context.scene.render.resolution_x = width
         bpy.context.scene.render.resolution_y = height
 
-
     def create_camera_from_feature(self, feature, sensor_width, collection, base_path):
         properties = feature['properties']
         filename = properties['filename']
@@ -129,7 +168,7 @@ class ImportGeoJSONCameraOperator(bpy.types.Operator, ImportHelper):
         rotation = properties['rotation']
         focal = properties['focal']
         
-        fov = 2 * math.degrees(math.atan(sensor_width / (2 * (sensor_width * focal)))) #not used but nice to keep around
+        fov = 2 * math.degrees(math.atan(sensor_width / (2 * (sensor_width * focal))))  # Not used but useful to keep
         
         focal_length = sensor_width * focal
         
@@ -173,74 +212,23 @@ class ImportGeoJSONCameraOperator(bpy.types.Operator, ImportHelper):
         
         camera_collection = bpy.data.collections.new(name="Imported Cameras")
         bpy.context.scene.collection.children.link(camera_collection)
-        self.calculate_translation_offset(features)
+        self.calculate_translation_offset(features)  # Calculate the offset here
         
         for feature in features:
             self.create_camera_from_feature(feature, self.sensor_width, camera_collection, base_path)
         
         return {'FINISHED'}
 
-class GeoJSONCameraImportPanel(bpy.types.Panel):
-    bl_label = "Import Camera Data"
-    bl_idname = "VIEW3D_PT_camera_import_panel"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category = 'Camera Import'
-
-    def draw(self, context):
-        layout = self.layout
-        
-        row = layout.row()
-        row.operator(
-            ImportGeoJSONCameraOperator.bl_idname,
-            text="Import GeoJSON Cameras",
-            icon='IMPORT')
-        
-        col = layout.column(align=True)
-        col.prop(context.scene, "geojson_camera_sensor_width", text="Sensor Width")
-        col.separator()
-        col.label(text="Translation Offset:")
-        
-        row = col.row(align=True)
-        row.prop(context.scene, "geojson_camera_translation_x", text="X")
-        row.prop(context.scene, "geojson_camera_translation_y", text="Y")
-        row.prop(context.scene, "geojson_camera_translation_z", text="Z")
+def menu_func_import(self, context):
+    self.layout.operator(ImportGeoJSONCameraOperator.bl_idname, text="GeoJSON Camera (.geojson)")
 
 def register():
     bpy.utils.register_class(ImportGeoJSONCameraOperator)
-    bpy.utils.register_class(GeoJSONCameraImportPanel)
-    
-    bpy.types.Scene.geojson_camera_sensor_width = bpy.props.FloatProperty(
-        name="Sensor Width",
-        description="Camera sensor width in mm. Default: 36.0)",
-        default=36.0,
-    )
-    
-    bpy.types.Scene.geojson_camera_translation_x = bpy.props.FloatProperty(
-        name="Translation Offset X",
-        description="Offset for the X axis",
-        default=0.0,
-    )
-    
-    bpy.types.Scene.geojson_camera_translation_y = bpy.props.FloatProperty(
-        name="Translation Offset Y",
-        description="Offset for the Y axis",
-        default=0.0,
-    )
-    
-    bpy.types.Scene.geojson_camera_translation_z = bpy.props.FloatProperty(
-        name="Translation Offset Z",
-        description="Offset for the Z axis",
-        default=0.0,
-    )
+    bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
 
 def unregister():
     bpy.utils.unregister_class(ImportGeoJSONCameraOperator)
-    bpy.utils.unregister_class(GeoJSONCameraImportPanel)
-    del bpy.types.Scene.geojson_camera_sensor_width
-    del bpy.types.Scene.geojson_camera_translation_x
-    del bpy.types.Scene.geojson_camera_translation_y
-    del bpy.types.Scene.geojson_camera_translation_z
+    bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
 
 if __name__ == "__main__":
     register()
