@@ -80,20 +80,23 @@ class ImportGeoJSONCameraOperator(bpy.types.Operator, ImportHelper):
         if self.use_mean_midpoint:
             print("Calculating mean midpoint for offset...")
             translations = [feature['properties']['translation'] for feature in features]
-            
+
             avg_x = sum(t[0] for t in translations) / len(translations)
             avg_y = sum(t[1] for t in translations) / len(translations)
+            avg_z = sum(t[2] for t in translations) / len(translations)
 
             self.translation_offset_x = avg_x
             self.translation_offset_y = avg_y
+            self.translation_offset_z = avg_z
 
-            print(f"Mean midpoint calculated: X={avg_x}, Y={avg_y}")
+            print(f"Mean midpoint calculated: X={avg_x}, Y={avg_y}, Z={avg_z}")
         else:
             print("Using manual offset...")
 
         # Check if any offset is applied
-        if (self.translation_offset_x == 0.0 and 
-            self.translation_offset_y == 0.0):
+        if (self.translation_offset_x == 0.0 and
+            self.translation_offset_y == 0.0 and
+            self.translation_offset_z == 0.0):
             # If no offset applied, do not create the text object
             print("No offset applied, skipping text object creation.")
             return
